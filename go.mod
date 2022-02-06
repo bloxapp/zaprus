@@ -1,4 +1,4 @@
-module github.com/moshe-blox/zaprus
+module github.com/bloxapp/zaprus
 
 go 1.17
 
