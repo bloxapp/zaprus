@@ -7,12 +7,13 @@ import (
 	"go.uber.org/zap"
 )
 
-// NewProxyLogrus returns a muted logrus.Logger that forwards logs to the given zap.Logger
-func NewProxyLogrus(logger *zap.Logger) *logrus.Logger {
-	lr := logrus.New()
-	lr.Out = io.Discard
-	lr.Hooks.Add(NewHook(logger))
-	return lr
+// NewProxy returns a muted logrus.Logger that forwards logs to the given zap.Logger
+func NewProxy(to *zap.Logger) (from *logrus.Logger) {
+	from = logrus.New()
+	from.Level = logrus.TraceLevel
+	Mute(from)
+	from.Hooks.Add(NewHook(to))
+	return from
 }
 
 // Hook is a logrus.Hook that forwards logs to a zap.Logger
@@ -26,19 +27,21 @@ func NewHook(logger *zap.Logger) *Hook {
 }
 
 func (hook *Hook) Fire(entry *logrus.Entry) error {
+	// Map logrus.Level to zapcore.Level
+	var fn func(msg string, fields ...zap.Field)
 	switch entry.Level {
 	case logrus.PanicLevel:
-		hook.logger.Panic(entry.Message, zap.Any("fields", entry.Data))
+		fn = hook.logger.Panic
 	case logrus.FatalLevel:
-		hook.logger.Fatal(entry.Message, zap.Any("fields", entry.Data))
+		fn = hook.logger.Fatal
 	case logrus.ErrorLevel:
-		hook.logger.Error(entry.Message, zap.Any("fields", entry.Data))
+		fn = hook.logger.Error
 	case logrus.WarnLevel:
-		hook.logger.Warn(entry.Message, zap.Any("fields", entry.Data))
+		fn = hook.logger.Warn
 	case logrus.InfoLevel:
-		hook.logger.Info(entry.Message, zap.Any("fields", entry.Data))
+		fn = hook.logger.Info
 	case logrus.DebugLevel, logrus.TraceLevel:
-		hook.logger.Debug(entry.Message, zap.Any("fields", entry.Data))
+		fn = hook.logger.Debug
 	default:
 		hook.logger.Error(
 			"zaprus: unknown level in logrus.Entry",
@@ -46,10 +49,33 @@ func (hook *Hook) Fire(entry *logrus.Entry) error {
 			zap.String("message", entry.Message),
 			zap.Any("fields", entry.Data),
 		)
+		return nil
 	}
+
+	// Log with zap.Logger
+	var fields []zap.Field
+	if len(entry.Data) > 0 {
+		fields = []zap.Field{zap.Any("fields", entry.Data)}
+	}
+	fn(entry.Message, fields...)
+
 	return nil
 }
 
 func (hook *Hook) Levels() []logrus.Level {
 	return logrus.AllLevels
+}
+
+// Mute disables the output of the given logrus.Logger
+func Mute(lr *logrus.Logger) {
+	lr.Formatter = NopFormatter{}
+	lr.Out = io.Discard
+}
+
+// NopFormatter is a logrus.Formatter that does nothing,
+// useful when disabling logrus output.
+type NopFormatter struct{}
+
+func (f NopFormatter) Format(entry *logrus.Entry) ([]byte, error) {
+	return nil, nil
 }
